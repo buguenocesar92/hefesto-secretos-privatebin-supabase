@@ -1,0 +1,7 @@
+services:
+  app:
+    environment:
+      PB_PUBLIC_URL: http://localhost:8110/
+      LOCAL_PREVIEW: "true"
+  gateway:
+    ports: ["127.0.0.1:8110:8080"]

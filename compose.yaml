@@ -1,0 +1,63 @@
+name: hefesto-secretos
+x-pg: &pg
+  PGHOST: ${DB_HOST:?Configurar DB_HOST}
+  PGPORT: "5432"
+  PGDATABASE: postgres
+  PGUSER: ${DB_USER:-privatebin_app}
+  PGPASSWORD: ${DB_PASSWORD:?Configurar DB_PASSWORD}
+  PGSSLMODE: verify-full
+  PGSSLROOTCERT: /certs/ca.crt
+  PGCONNECT_TIMEOUT: "15"
+services:
+  preflight:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: "no"
+    environment:
+      <<: *pg
+      SUPABASE_DEDICATED_CONFIRMED: ${SUPABASE_DEDICATED_CONFIRMED:-false}
+      SUPABASE_DATA_API_DISABLED: ${SUPABASE_DATA_API_DISABLED:-false}
+    volumes: [./certs:/certs:ro, ./ops:/opt/hefesto:ro]
+    entrypoint: [sh, /opt/hefesto/preflight.sh]
+  app:
+    image: privatebin/nginx-fpm-alpine:2.0.6@sha256:13290e2f04bfd98cf8fc7e8d216fb76b2b2d12373d4923b859cd41c2d984fde8
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    depends_on:
+      preflight: {condition: service_completed_successfully}
+    entrypoint: [sh, /opt/hefesto/app-start.sh]
+    environment:
+      TZ: America/Santiago
+      CONFIG_PATH: /srv/cfg
+      STORAGE_HOST: ${DB_HOST}
+      STORAGE_LOGIN: ${DB_USER:-privatebin_app}
+      STORAGE_PASSWORD: ${DB_PASSWORD}
+      PB_PUBLIC_URL: ${PUBLIC_URL:?Configurar URL HTTPS con barra final}
+      LOCAL_PREVIEW: "false"
+    expose: ["8080"]
+    volumes:
+      - ./certs:/certs:ro
+      - ./ops:/opt/hefesto:ro
+      - ./ops/conf.php:/srv/cfg/conf.php:ro
+      - ./ops/zz-hefesto.conf:/etc/php/php-fpm.d/zz-hefesto.conf:ro
+    tmpfs:
+      - /tmp:rw,nodev,noexec,nosuid,mode=1777
+      - /run:rw,nodev,nosuid,mode=1777
+      - /srv/data:rw,nodev,noexec,nosuid,uid=65534,gid=82,mode=0700
+      - /var/lib/nginx/tmp:rw,nodev,noexec,nosuid,uid=65534,gid=82,mode=0700
+  gateway:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    entrypoint: [sh, /opt/hefesto/gateway-start.sh]
+    depends_on: [app]
+    environment:
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?Configurar usuario}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?Configurar bcrypt}
+    expose: ["8080"]
+    volumes: [./ops:/opt/hefesto:ro]
+  dbtools:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    profiles: [tools]
+    environment: *pg
+    volumes: [./certs:/certs:ro, ./ops:/opt/hefesto:ro]

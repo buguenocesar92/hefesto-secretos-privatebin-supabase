@@ -1,0 +1,11 @@
+# Aceptación en servidor
+- `docker compose ... config --quiet` sin errores. Preflight finaliza 0; app y gateway permanecen activos.
+- Gateway anónimo devuelve 401, contraseña errónea 401, correcta permite el editor. No existe puerto público directo de app. Acceso público únicamente HTTPS.
+- Crear nota ficticia con expiración de 5 minutos, quemar activado y contraseña adicional. Copiar enlace completo con fragmento # y conservar enlace de eliminación por separado. No registrar el enlace en servicios de analítica/acortadores.
+- Abrir en navegador privado introduciendo Basic Auth y contraseña adicional. Confirmar que el segundo intento de lectura de una nota quemada falla. Probar contraseña errónea sin asumir de antemano si consume o no la nota; verificar el comportamiento de esta versión.
+- Probar caducidad con otra nota, sin datos reales. Probar eliminación mediante su enlace de borrado. Verificar que no hay adjuntos ni comentarios y que solo hay opciones hasta 1 día.
+- Probar el mismo flujo desde móvil y el canal real de envío: comprobar que previsualizaciones o escáneres no consumen notas antes que el destinatario.
+- Confirmar en Supabase que solo aparecen privatebin_paste, privatebin_comment y privatebin_config en public bajo privatebin_app; no conceder acceso API a esas tablas. No exportar su contenido a logs.
+- Detener/recrear contenedores y comprobar con una nota ficticia no quemada que el backend PostgreSQL conserva lo previsto.
+- Respaldo y restauración en otro proyecto vacío; comprobar la restauración y el posible retorno de notas quemadas después de la copia. Registrar resultados sin enlaces ni secretos reales.
+- Comprobar que PHP-FPM expande STORAGE_* y PB_PUBLIC_URL: crear y leer una nota es la prueba funcional. El validador CLI no sustituye esta comprobación.

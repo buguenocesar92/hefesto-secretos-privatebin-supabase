@@ -1,0 +1,24 @@
+{
+    admin off
+    auto_https off
+    persist_config off
+}
+:8080 {
+    basic_auth {
+        {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+    }
+    request_body {
+        max_size 2MB
+    }
+    header {
+        Cache-Control "no-store"
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        -Server
+    }
+    encode zstd gzip
+    reverse_proxy app:8080 {
+        header_up -Authorization
+    }
+}
