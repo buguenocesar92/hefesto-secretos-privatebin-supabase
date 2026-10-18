@@ -12,7 +12,7 @@ Requisitos: Docker Engine con Compose v2, Python 3.11+, dominio HTTPS y proyecto
 1. Descomprimir y entrar en esta carpeta. Ejecutar `python3 scripts/configure.py`: crea `.env` con permiso 0600, genera una clave DB hexadecimal y rechaza sobrescribirlo.
 2. Crear un proyecto Supabase exclusivo; no reutilizar el de KraftDo u otro sistema. Desactivar su Data API en la configuración del proyecto. Este kit usa PostgreSQL, no Supabase Auth, Storage ni la API REST. No se necesita service_role.
 3. Ejecutar `sql/01-supabase-app.sql` como administrador en SQL Editor. No contiene contraseña ni borra tablas. Falla si public contiene tablas. Asignar al rol `privatebin_app` la clave de `.env` mediante `\password privatebin_app` desde psql administrativo: solicita la clave sin incluirla en el comando ni el historial. El script configura privilegios por defecto para futuras tablas.
-4. Completar DB_HOST, DB_USER y PUBLIC_URL. Preferir conexión directa puerto 5432; si el VPS no dispone de IPv6, usar el pooler **Session** en 5432 y DB_USER=`privatebin_app.PROJECTREF`. No usar Transaction 6543 para inicialización, copias ni restauración. Guardar la CA real del proyecto en `certs/ca.crt`, legible por los contenedores. No desactivar verify-full.
+4. Completar DB_HOST, DB_USER y PUBLIC_URL. Preferir conexión directa puerto 5432; si el VPS no dispone de IPv6, usar el pooler **Session** en 5432 y DB_USER=`privatebin_app.PROJECTREF`. No usar Transaction 6543 para inicialización, copias ni restauración. Guardar la CA real del proyecto en `certs/ca.crt`, legible por los contenedores. No desactivar verify-full, salvo en el MVP Coolify sobre red interna (`DB_SSLMODE=disable`).
 5. Cambiar las dos confirmaciones SUPABASE_* a true solo después de completar esos pasos. Los scripts comprueban permisos, rol y tablas, pero no pueden demostrar que pulsaste la opción Data API en el panel.
 6. Generar un hash bcrypt para el acceso:
 
@@ -31,14 +31,14 @@ docker compose -f compose.yaml -f compose.bootstrap.yaml up -d
 
 Abrir un túnel `ssh -L 8110:127.0.0.1:8110 usuario@servidor` y visitar `http://localhost:8110/`. Web Crypto funciona en localhost; no sustituirlo por una IP HTTP pública. El override solo admite esa URL local. Introducir Basic Auth y probar con `DEMO — sin datos reales` siguiendo `docs/ACEPTACION.md`. No se crean notas de prueba automáticamente.
 
-## Coolify
+## Despliegue en Coolify (MVP Hefesto)
 Importar la carpeta completa desde repositorio privado como recurso Docker Compose. Usar solo `compose.yaml`; los montajes relativos `ops/` y `certs/` deben existir en el checkout o configurarse como archivos persistentes del recurso. La CA no es una clave secreta, pero tiene que proceder del proyecto correcto. Conservar permisos de lectura para el proceso no root de PrivateBin.
 
 Introducir variables en el recurso; en el formulario Coolify el bcrypt se pega literal, sin las comillas envolventes de `.env`. Asignar un dominio HTTPS **solo a gateway, puerto 8080**. No publicar app, preflight ni dbtools ni añadir puertos del host. TLS termina en Coolify. Usar dominio raíz, sin subruta y con barra final en PUBLIC_URL.
 
 Para cambiar desde la prueba local, detener el stack con ambos archivos y recrearlo usando solo compose.yaml, para eliminar el puerto local y LOCAL_PREVIEW. No reutilizar notas reales entre dominios. Una comprobación anónima del gateway devuelve 401: el `healthcheck` definido en el compose (`wget -S -q -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q ' 401'`) considera sano ese 401, así que no se debe reemplazar por uno que espere 200 sin enviar credenciales. Verificar acceso autenticado mediante una prueba privada.
 
-### Variables del recurso Coolify (MVP Hefesto)
+### Variables del recurso
 
 El compose parametriza el nombre de base, el `sslmode` y la ruta de la CA. Los valores por defecto preservan el uso original con Supabase dedicado; ajustar solo si la base de datos es compartida con otros sistemas.
 
@@ -55,6 +55,18 @@ El compose parametriza el nombre de base, el `sslmode` y la ruta de la CA. Los v
 | `SUPABASE_DATA_API_DISABLED` | `false` | Poner `true` cuando la Data API (PostgREST) esté apagada en el panel del proyecto. |
 | `BASIC_AUTH_USER` | — (obligatorio) | Usuario del gateway, 3–48 caracteres `[A-Za-z0-9_-]`. |
 | `BASIC_AUTH_HASH` | — (obligatorio) | Hash bcrypt (`$2[aby]$<coste>$...`) pegado literal, sin comillas envolventes; Coolify no debe interpolar el `$`. |
+
+### Configuración del MVP en el Postgres compartido de Supabase
+
+Para el MVP Hefesto el kit se conecta por la red interna de Docker al Postgres compartido de Supabase. La base se llama `mvp_secretos`, se crea aparte del `postgres` por defecto y `sql/01-supabase-app.sql` se ejecuta **dentro de esa base**, no en `postgres`. La CA deja de ser necesaria porque el tráfico no sale a internet.
+
+Valores del recurso para este escenario:
+
+- `DB_HOST` — host interno del Postgres compartido (no resuelve desde internet).
+- `DB_SSLMODE=disable` — la red interna no valida TLS.
+- `DB_NAME=mvp_secretos` — base dedicada al kit, creada con `CREATE DATABASE mvp_secretos OWNER postgres;` antes de correr el SQL.
+- `SUPABASE_DEDICATED_CONFIRMED=true` y `SUPABASE_DATA_API_DISABLED=true` — la base sigue siendo exclusiva de este kit y la API REST del proyecto está apagada (los chequeos de preflight no se relajan).
+- `ca.crt` — opcional; si no se monta, `DB_SSLROOTCERT` debe apuntar a una ruta inexistente o no fijarse.
 
 ## Persistencia y seguridad práctica
 Desde PrivateBin 1.4, el backend Database conserva también estado de servidor y limitadores en DB; en este kit no hay volumen persistente de documentos. `/srv/data` es temporal y el respaldo útil es PostgreSQL. No se modifica el motor criptográfico upstream. Se conserva CSP nativa y no se añaden analítica, acortadores ni JavaScript de terceros.
