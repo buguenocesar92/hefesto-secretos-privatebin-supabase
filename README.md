@@ -38,6 +38,24 @@ Introducir variables en el recurso; en el formulario Coolify el bcrypt se pega l
 
 Para cambiar desde la prueba local, detener el stack con ambos archivos y recrearlo usando solo compose.yaml, para eliminar el puerto local y LOCAL_PREVIEW. No reutilizar notas reales entre dominios. Una comprobación anónima del gateway devuelve 401: no configurar un healthcheck de Coolify que espere 200 sin credenciales. Verificar acceso autenticado mediante una prueba privada.
 
+### Variables del recurso Coolify (MVP Hefesto)
+
+El compose parametriza el nombre de base, el `sslmode` y la ruta de la CA. Los valores por defecto preservan el uso original con Supabase dedicado; ajustar solo si la base de datos es compartida con otros sistemas.
+
+| Variable | Por defecto | Significado |
+|----------|-------------|-------------|
+| `DB_NAME` | `postgres` | Base a la que se conecta el rol `privatebin_app`. En un Postgres compartido con otras apps, usar `mvp_<slug>` para evitar pisar tablas ajenas. |
+| `DB_SSLMODE` | `verify-full` | Modo TLS al servidor. Si el host es interno y no se valida CA, fijar `disable`. Cualquier valor distinto de `verify-full`/`verify-ca` hace opcional `certs/ca.crt` y el DSN ya no exige CA. |
+| `DB_SSLROOTCERT` | `/certs/ca.crt` | Ruta de la CA en el contenedor; no es necesario cambiarla salvo que se monte `ca.crt` en otra ruta. |
+| `DB_USER` | `privatebin_app` | Rol de aplicación. Acepta `privatebin_app.<ref>` para pooler Session de Supabase. |
+| `DB_HOST` | — (obligatorio) | Host PostgreSQL (Supabase directo o pooler Session 5432). |
+| `DB_PASSWORD` | — (obligatorio) | Clave hexadecimal de 64 caracteres generada por `scripts/configure.py`. |
+| `PUBLIC_URL` | — (obligatorio) | URL HTTPS raíz con barra final, dominio público asignado a `gateway:8080`. |
+| `SUPABASE_DEDICATED_CONFIRMED` | `false` | Poner `true` solo cuando el proyecto Supabase sea exclusivo de este kit. |
+| `SUPABASE_DATA_API_DISABLED` | `false` | Poner `true` cuando la Data API (PostgREST) esté apagada en el panel del proyecto. |
+| `BASIC_AUTH_USER` | — (obligatorio) | Usuario del gateway, 3–48 caracteres `[A-Za-z0-9_-]`. |
+| `BASIC_AUTH_HASH` | — (obligatorio) | Hash bcrypt (`$2[aby]$<coste>$...`) pegado literal, sin comillas envolventes; Coolify no debe interpolar el `$`. |
+
 ## Persistencia y seguridad práctica
 Desde PrivateBin 1.4, el backend Database conserva también estado de servidor y limitadores en DB; en este kit no hay volumen persistente de documentos. `/srv/data` es temporal y el respaldo útil es PostgreSQL. No se modifica el motor criptográfico upstream. Se conserva CSP nativa y no se añaden analítica, acortadores ni JavaScript de terceros.
 
