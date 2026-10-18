@@ -9,7 +9,7 @@ $pwd = getenv('STORAGE_PASSWORD');
 if (!is_string($pwd) || !preg_match('/^[a-f0-9]{64}$/D', $pwd)) stop_invalid('Usar clave DB hexadecimal de 64 caracteres generada por configure.py');
 $dbname = (string) getenv('STORAGE_DBNAME');
 if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/D', $dbname)) stop_invalid('STORAGE_DBNAME invalido (identificador PostgreSQL)');
-$sslmode = strtolower((string) getenv('STORAGE_SSLMODE'));
+$sslmode = (string) getenv('STORAGE_SSLMODE');
 if ($sslmode === '') $sslmode = 'verify-full';
 $allowed_modes = ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'];
 if (!in_array($sslmode, $allowed_modes, true)) stop_invalid('STORAGE_SSLMODE invalido');
