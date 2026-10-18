@@ -36,7 +36,7 @@ Importar la carpeta completa desde repositorio privado como recurso Docker Compo
 
 Introducir variables en el recurso; en el formulario Coolify el bcrypt se pega literal, sin las comillas envolventes de `.env`. Asignar un dominio HTTPS **solo a gateway, puerto 8080**. No publicar app, preflight ni dbtools ni añadir puertos del host. TLS termina en Coolify. Usar dominio raíz, sin subruta y con barra final en PUBLIC_URL.
 
-Para cambiar desde la prueba local, detener el stack con ambos archivos y recrearlo usando solo compose.yaml, para eliminar el puerto local y LOCAL_PREVIEW. No reutilizar notas reales entre dominios. Una comprobación anónima del gateway devuelve 401: no configurar un healthcheck de Coolify que espere 200 sin credenciales. Verificar acceso autenticado mediante una prueba privada.
+Para cambiar desde la prueba local, detener el stack con ambos archivos y recrearlo usando solo compose.yaml, para eliminar el puerto local y LOCAL_PREVIEW. No reutilizar notas reales entre dominios. Una comprobación anónima del gateway devuelve 401: el `healthcheck` definido en el compose (`wget -S -q -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q ' 401'`) considera sano ese 401, así que no se debe reemplazar por uno que espere 200 sin enviar credenciales. Verificar acceso autenticado mediante una prueba privada.
 
 ### Variables del recurso Coolify (MVP Hefesto)
 

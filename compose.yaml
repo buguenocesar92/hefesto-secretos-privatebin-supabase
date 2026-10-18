@@ -58,6 +58,13 @@ services:
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?Configurar bcrypt}
     expose: ["8080"]
     volumes: [./ops:/opt/hefesto:ro]
+    # El 401 de Basic Auth es señal suficiente de que el gateway responde;
+    # wget no envía Authorization, así que no requiere credenciales.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -S -q -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q ' 401'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
   dbtools:
     image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     profiles: [tools]
