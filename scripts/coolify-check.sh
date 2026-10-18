@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Composes a verificar. Formato: <base_dir>|<archivo>|<tipo_bd>
+# Composes a verificar. Formato: <base_dir>|<archivo_relativo>|<tipo_bd>
 # tipo_bd ∈ {supabase-pg, supabase-rest, none}
 COMPOSES=(
   "$REPO_ROOT|compose.yaml|supabase-pg"
@@ -33,31 +33,63 @@ fail() {
   echo "$1" >&2
 }
 
-# Renderiza un compose y devuelve el JSON normalizado.
+# Renderiza un compose y devuelve el JSON normalizado. Devuelve 1 si falla,
+# pero NO llama a `fail` (eso lo hace el caller en el contexto principal
+# para que el error no se pierda en el subshell de la sustitución de comando).
 render_compose() {
   local base_dir="$1"
   local compose_file="$2"
   local env_file="$3"
-  local out
-  if ! out=$(docker compose --project-directory "$base_dir" -f "$compose_file" --env-file "$env_file" config --format json 2> "$TMPDIR/render.err"); then
-    local err
-    err=$(cat "$TMPDIR/render.err")
-    fail "$compose_file: error al renderizar: $err"
+  if ! docker compose --project-directory "$base_dir" -f "$compose_file" \
+      --env-file "$env_file" config --format json \
+      2> "$TMPDIR/render.err" > "$TMPDIR/render.json"; then
     return 1
   fi
-  printf '%s' "$out"
+  cat "$TMPDIR/render.json"
 }
 
-# Chequeos estructurales sobre el ARCHIVO compose (no el render, que autollena
-# `name` y nombres de redes/volúmenes a partir del directorio del proyecto).
+# Genera un .env temporal a partir de las ${VAR} que aparecen en el compose.
+# Las de host/URL se inventan apuntando a un dominio inválido; el resto recibe
+# un valor ficticio no secreto. Para supabase-pg se fuerzan DB_NAME=mvp_prueba
+# y DB_SSLMODE=disable (los exige el punto 3 del contrato).
+generate_env() {
+  local compose_file="$1"
+  local db_type="$2"
+  local env_file="$3"
+  local vars
+  vars=$(grep -oE '\$\{[A-Z_][A-Z0-9_]*|\$[A-Z_][A-Z0-9_]*' "$compose_file" \
+    | sed -E 's/^\$\{?//' \
+    | sort -u) || vars=""
+  : > "$env_file"
+  local key
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    case "$key" in
+      PUBLIC_URL|DB_HOST|STORAGE_HOST)
+        echo "$key=https://ejemplo.invalid" >> "$env_file"
+        ;;
+      *)
+        echo "$key=x1234567890" >> "$env_file"
+        ;;
+    esac
+  done <<< "$vars"
+  if [ "$db_type" = "supabase-pg" ]; then
+    echo "DB_SSLMODE=disable" >> "$env_file"
+    echo "DB_NAME=mvp_prueba" >> "$env_file"
+  fi
+  return 0
+}
+
+# Chequeos sobre el ARCHIVO compose (no el render, que autollena `name`).
+# Cubre: name a nivel raíz y `name:` fijo en redes y volúmenes declarados.
 check_source() {
   local compose_file="$1"
   local out_file="$TMPDIR/source-$(basename "$compose_file").txt"
-  python3 - "$compose_file" "$REPO_ROOT" > "$out_file" <<'PY' || true
+  if ! python3 - "$compose_file" "$REPO_ROOT" > "$out_file" <<'PY'
 import sys
 import yaml
 
-compose_file, repo_root = sys.argv[1], sys.argv[2]
+compose_file, _repo_root = sys.argv[1], sys.argv[2]
 with open(compose_file) as f:
     data = yaml.safe_load(f) or {}
 
@@ -66,30 +98,6 @@ label = compose_file
 # Punto 2: name: a nivel raíz.
 if 'name' in data:
     print(f"{label}: tiene 'name:' a nivel raiz (Coolify pone el nombre del proyecto)")
-
-# Punto 1: campos prohibidos en servicios sin profiles.
-for service, cfg in (data.get('services') or {}).items():
-    profiles = cfg.get('profiles') or []
-    if profiles:
-        continue
-    for field in ('ports', 'container_name', 'privileged', 'cap_add',
-                  'devices', 'network_mode', 'pid', 'ipc'):
-        if field in cfg:
-            print(f"{service}: campo prohibido '{field}' (debe quedar detras de Traefik)")
-    sec_opt = cfg.get('security_opt') or []
-    if any('unconfined' in str(s) for s in sec_opt):
-        print(f"{service}: security_opt contiene 'unconfined'")
-    for vol in (cfg.get('volumes') or []):
-        if isinstance(vol, str) and 'docker.sock' in vol:
-            print(f"{service}: monta docker.sock")
-            break
-    for vol in (cfg.get('volumes') or []):
-        if not isinstance(vol, str):
-            continue
-        src = vol.split(':', 1)[0]
-        if src.startswith('/') and src != '/dev/null' and not src.startswith(repo_root):
-            print(f"{service}: bind fuera del repositorio (no permitido en Coolify)")
-            break
 
 # Punto 2: redes sin name fijo.
 for net, cfg in (data.get('networks') or {}).items():
@@ -101,10 +109,77 @@ for vol, cfg in (data.get('volumes') or {}).items():
     if isinstance(cfg, dict) and cfg.get('name'):
         print(f"volumen {vol}: name fijo '{cfg['name']}'")
 PY
+  then
+    fail "$compose_file: no se pudo analizar el compose"
+    return 1
+  fi
   local line
   while IFS= read -r line; do
     [ -n "$line" ] && fail "$line"
   done < "$out_file"
+  return 0
+}
+
+# Chequeos sobre el RENDER (con jq) para los puntos 1 y 2 del contrato:
+# campos prohibidos, security_opt=unconfined, binds fuera del repo o
+# docker.sock. La normalización del render unifica la sintaxis corta y
+# larga de volúmenes.
+check_render() {
+  local render="$1"
+  local label="$2"
+
+  local forbidden
+  forbidden=$(echo "$render" | jq -r '
+    .services
+    | to_entries[]
+    | select((.value.profiles // []) | length == 0)
+    | .key as $s
+    | .value
+    | to_entries[]
+    | select(
+        .key == "ports" or .key == "container_name" or .key == "privileged"
+        or .key == "cap_add" or .key == "devices" or .key == "network_mode"
+        or .key == "pid" or .key == "ipc"
+      )
+    | "\($s): campo prohibido [\(.key)] (debe quedar detras de Traefik)"
+  ' 2>/dev/null || true)
+  while IFS= read -r line; do
+    [ -n "$line" ] && fail "$label: $line"
+  done <<< "$forbidden"
+
+  local unconfined
+  unconfined=$(echo "$render" | jq -r '
+    .services
+    | to_entries[]
+    | select((.value.profiles // []) | length == 0)
+    | .key as $s
+    | (.value.security_opt // [])[]
+    | select(test("unconfined"))
+    | "\($s): security_opt contiene unconfined"
+  ' 2>/dev/null || true)
+  while IFS= read -r line; do
+    [ -n "$line" ] && fail "$label: $line"
+  done <<< "$unconfined"
+
+  local bad_binds
+  bad_binds=$(echo "$render" | jq -r --arg repo "$REPO_ROOT" '
+    .services
+    | to_entries[]
+    | select((.value.profiles // []) | length == 0)
+    | .key as $s
+    | (.value.volumes // [])[]
+    | select(type == "object" and .type == "bind")
+    | . as $bind
+    | select(
+        (($bind.source | startswith($repo) | not) and ($bind.source != "/dev/null"))
+        or ($bind.source | test("docker\\.sock"))
+      )
+    | "\($s): bind no permitido en \($bind.source)"
+  ' 2>/dev/null || true)
+  while IFS= read -r line; do
+    [ -n "$line" ] && fail "$label: $line"
+  done <<< "$bad_binds"
+  return 0
 }
 
 # Punto 3: comprobar DB_NAME y DB_SSLMODE en render para supabase-pg.
@@ -113,7 +188,10 @@ check_supabase_pg() {
   local label="$2"
 
   local has_dbname
-  has_dbname=$(echo "$render" | jq -r '[.. | strings] | map(select(. == "mvp_prueba")) | length')
+  has_dbname=$(echo "$render" | jq -r '
+    [.. | objects | to_entries[] | .value | strings | select(. == "mvp_prueba")]
+    | length
+  ' 2>/dev/null || echo 0)
   if [ "$has_dbname" = "0" ]; then
     fail "$label: DB_NAME=mvp_prueba no aparece en el render (DSN o variables del servicio web)"
   fi
@@ -129,33 +207,20 @@ check_supabase_pg() {
     ]
     | map(select(. == "disable"))
     | length
-  ')
+  ' 2>/dev/null || echo 0)
   if [ "$has_sslmode" = "0" ]; then
     fail "$label: DB_SSLMODE=disable no aparece en el render"
   fi
+  return 0
 }
 
 main() {
   for entry in "${COMPOSES[@]}"; do
-    IFS='|' read -r base_dir compose_file db_type <<< "$entry"
+    IFS='|' read -r base_dir compose_rel db_type <<< "$entry"
+    local compose_file="$base_dir/$compose_rel"
 
     local env_file="$TMPDIR/$(basename "$compose_file").env"
-    cat > "$env_file" <<'EOF'
-PUBLIC_URL=https://ejemplo.invalid/
-DB_HOST=db.ejemplo.invalid
-DB_USER=x1234
-DB_PASSWORD=x12345678901234567890123456789012
-SUPABASE_DEDICATED_CONFIRMED=true
-SUPABASE_DATA_API_DISABLED=true
-BASIC_AUTH_USER=x1234
-BASIC_AUTH_HASH=x1234567890abcdef
-EOF
-    if [ "$db_type" = "supabase-pg" ]; then
-      cat >> "$env_file" <<'EOF'
-DB_SSLMODE=disable
-DB_NAME=mvp_prueba
-EOF
-    fi
+    generate_env "$compose_file" "$db_type" "$env_file"
 
     echo "=== Verificando $compose_file (bd=$db_type) ==="
 
@@ -163,9 +228,14 @@ EOF
 
     local render
     if render=$(render_compose "$base_dir" "$compose_file" "$env_file"); then
+      check_render "$render" "$compose_file"
       if [ "$db_type" = "supabase-pg" ]; then
         check_supabase_pg "$render" "$compose_file"
       fi
+    else
+      local err
+      err=$(cat "$TMPDIR/render.err" 2>/dev/null || true)
+      fail "$compose_file: no renderiza: ${err:-comando fallo sin mensaje}"
     fi
   done
 
