@@ -129,7 +129,7 @@ check_render() {
   local label="$2"
 
   local forbidden
-  forbidden=$(echo "$render" | jq -r '
+  if ! forbidden=$(echo "$render" | jq -r '
     .services
     | to_entries[]
     | select((.value.profiles // []) | length == 0)
@@ -142,13 +142,16 @@ check_render() {
         or .key == "pid" or .key == "ipc"
       )
     | "\($s): campo prohibido [\(.key)] (debe quedar detras de Traefik)"
-  ' 2>/dev/null || true)
+  '); then
+    fail "$label: no se pudo analizar el render (campos prohibidos)"
+    forbidden=""
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] && fail "$label: $line"
   done <<< "$forbidden"
 
   local unconfined
-  unconfined=$(echo "$render" | jq -r '
+  if ! unconfined=$(echo "$render" | jq -r '
     .services
     | to_entries[]
     | select((.value.profiles // []) | length == 0)
@@ -156,13 +159,16 @@ check_render() {
     | (.value.security_opt // [])[]
     | select(test("unconfined"))
     | "\($s): security_opt contiene unconfined"
-  ' 2>/dev/null || true)
+  '); then
+    fail "$label: no se pudo analizar el render (security_opt)"
+    unconfined=""
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] && fail "$label: $line"
   done <<< "$unconfined"
 
   local bad_binds
-  bad_binds=$(echo "$render" | jq -r --arg repo "$REPO_ROOT" '
+  if ! bad_binds=$(echo "$render" | jq -r --arg repo "$REPO_ROOT" '
     .services
     | to_entries[]
     | select((.value.profiles // []) | length == 0)
@@ -175,7 +181,10 @@ check_render() {
         or ($bind.source | test("docker\\.sock"))
       )
     | "\($s): bind no permitido en \($bind.source)"
-  ' 2>/dev/null || true)
+  '); then
+    fail "$label: no se pudo analizar el render (binds)"
+    bad_binds=""
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] && fail "$label: $line"
   done <<< "$bad_binds"
