@@ -38,7 +38,7 @@ batchsize = 100
 [model]
 class = Database
 [model_options]
-dsn = "pgsql:host=${STORAGE_HOST};port=5432;dbname=postgres;sslmode=verify-full;sslrootcert=/certs/ca.crt;connect_timeout=15"
+dsn = "pgsql:host=${STORAGE_HOST};port=5432;dbname=${STORAGE_DBNAME};sslmode=${STORAGE_SSLMODE};sslrootcert=${STORAGE_SSLROOTCERT};connect_timeout=15"
 tbl = "privatebin_"
 usr = "${STORAGE_LOGIN}"
 pwd = "${STORAGE_PASSWORD}"

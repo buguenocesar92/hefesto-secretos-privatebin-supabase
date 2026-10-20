@@ -1,12 +1,11 @@
-name: hefesto-secretos
 x-pg: &pg
   PGHOST: ${DB_HOST:?Configurar DB_HOST}
   PGPORT: "5432"
-  PGDATABASE: postgres
+  PGDATABASE: ${DB_NAME:-postgres}
   PGUSER: ${DB_USER:-privatebin_app}
   PGPASSWORD: ${DB_PASSWORD:?Configurar DB_PASSWORD}
-  PGSSLMODE: verify-full
-  PGSSLROOTCERT: /certs/ca.crt
+  PGSSLMODE: ${DB_SSLMODE:-verify-full}
+  PGSSLROOTCERT: ${DB_SSLROOTCERT:-/certs/ca.crt}
   PGCONNECT_TIMEOUT: "15"
 services:
   preflight:
@@ -31,6 +30,9 @@ services:
       TZ: America/Santiago
       CONFIG_PATH: /srv/cfg
       STORAGE_HOST: ${DB_HOST}
+      STORAGE_DBNAME: ${DB_NAME:-postgres}
+      STORAGE_SSLMODE: ${DB_SSLMODE:-verify-full}
+      STORAGE_SSLROOTCERT: ${DB_SSLROOTCERT:-/certs/ca.crt}
       STORAGE_LOGIN: ${DB_USER:-privatebin_app}
       STORAGE_PASSWORD: ${DB_PASSWORD}
       PB_PUBLIC_URL: ${PUBLIC_URL:?Configurar URL HTTPS con barra final}
@@ -56,6 +58,13 @@ services:
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?Configurar bcrypt}
     expose: ["8080"]
     volumes: [./ops:/opt/hefesto:ro]
+    # El 401 de Basic Auth es señal suficiente de que el gateway responde;
+    # wget no envía Authorization, así que no requiere credenciales.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -S -q -O /dev/null http://127.0.0.1:8080/ 2>&1 | grep -q ' 401'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
   dbtools:
     image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     profiles: [tools]
