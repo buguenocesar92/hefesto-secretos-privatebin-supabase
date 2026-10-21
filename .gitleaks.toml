@@ -1,0 +1,9 @@
+title = "gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valores de ejemplo (fixtures) del verificador de Coolify, introducidos por el commit 714b9fac54de17d837154bd33ef41a2597a7f853 y ya retirados del arbol actual. No hay ningun secreto real: son literales de ejemplo del propio contrato."
+commits = ["714b9fac54de17d837154bd33ef41a2597a7f853"]
+paths = ['''scripts/coolify-check\.sh''']
