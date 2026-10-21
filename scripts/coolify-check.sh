@@ -84,7 +84,8 @@ generate_env() {
 # Cubre: name a nivel raíz y `name:` fijo en redes y volúmenes declarados.
 check_source() {
   local compose_file="$1"
-  local out_file="$TMPDIR/source-$(basename "$compose_file").txt"
+  local out_file
+  out_file="$TMPDIR/source-$(basename "$compose_file").txt"
   if ! python3 - "$compose_file" "$REPO_ROOT" > "$out_file" <<'PY'
 import sys
 import yaml
@@ -228,7 +229,8 @@ main() {
     IFS='|' read -r base_dir compose_rel db_type <<< "$entry"
     local compose_file="$base_dir/$compose_rel"
 
-    local env_file="$TMPDIR/$(basename "$compose_file").env"
+    local env_file
+    env_file="$TMPDIR/$(basename "$compose_file").env"
     generate_env "$compose_file" "$db_type" "$env_file"
 
     echo "=== Verificando $compose_file (bd=$db_type) ==="
