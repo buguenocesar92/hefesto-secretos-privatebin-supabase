@@ -1,0 +1,5 @@
+# Falso positivo conocido: el commit 714b9fa escribia en el heredoc de
+# generate_env un BASIC_AUTH_HASH de ejemplo (x1234567890abcdef) para renderizar
+# el compose en las pruebas. No es una credencial real y ese commit ya no se
+# vuelve a tocar. Se ignora solo esa huella.
+714b9fac54de17d837154bd33ef41a2597a7f853:scripts/coolify-check.sh:generic-api-key:151
